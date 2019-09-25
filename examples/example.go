@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/frncscsrcc/longpoll"
 	"log"
 	"net/http"
-	"github.com/frncscsrcc/longpoll"
 	"time"
 )
 
