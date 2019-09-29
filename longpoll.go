@@ -1,8 +1,8 @@
 package longpoll
 
 import (
-	"encoding/json"
 	"fmt"
+	"github.com/frncscsrcc/resthelper"
 	"math/rand"
 	"net/http"
 	"time"
@@ -73,18 +73,13 @@ type EventResponse struct {
 	Events []event
 }
 
-type ErrorResponse struct {
-	Code    int
-	Message string
-}
-
 func (lp *LongPoll) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 	feeds, ok := r.URL.Query()["feed"]
 	if ok != true {
-		sendError(w, 400, "Missing feed")
+		resthelper.SendError(w, 400, "Missing feed")
 		return
 	}
-	token := GetNewToken(32)
+	token := resthelper.GetNewToken(32)
 
 	// Client is not pending
 	lp.globalClients[token] = false
@@ -92,7 +87,7 @@ func (lp *LongPoll) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 	// Feeds validation
 	for _, feed := range feeds {
 		if _, ok := lp.globalFeedToClients[feed]; ok == false {
-			sendError(w, 500, fmt.Sprintf("Feed %s is not available", feed))
+			resthelper.SendError(w, 500, fmt.Sprintf("Feed %s is not available", feed))
 			return
 		}
 	}
@@ -101,20 +96,20 @@ func (lp *LongPoll) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 		lp.globalFeedToClients[feed][token] = true
 	}
 
-	sendResponse(w, SubscriptionResponse{token, feeds})
+	resthelper.SendResponse(w, SubscriptionResponse{token, feeds})
 }
 
 func (lp *LongPoll) ListenHandler(w http.ResponseWriter, r *http.Request) {
 	tokens, ok := r.URL.Query()["token"]
 	if ok != true {
-		sendError(w, 400, "Missing token")
+		resthelper.SendError(w, 400, "Missing token")
 		return
 	}
 	token := tokens[0]
 
 	// Check if token exists
 	if _, clientExists := lp.globalClients[token]; clientExists == false {
-		sendError(w, 401, "Unauthorized")
+		resthelper.SendError(w, 401, "Unauthorized")
 		return
 	}
 
@@ -153,13 +148,13 @@ func (lp *LongPoll) ListenHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Another connection from the same client, this one should be disharged
 		if operation == "ABORT" {
-			sendError(w, 204, "Connection aborted")
+			resthelper.SendError(w, 204, "Connection aborted")
 			fmt.Printf("Sent abort signal to %s (%d)\n", token, currentConnection)
 			return
 		}
 		// Timeout
 		if operation == "TIMEOUT" {
-			sendError(w, 408, "Request timeout")
+			resthelper.SendError(w, 408, "Request timeout")
 			fmt.Printf("Sent timeout signal to %s (%d)\n", token, currentConnection)
 			// Delete the connection, or next client will try to closed this one
 			// but it does not exist anymore and it would lock
@@ -178,7 +173,7 @@ func (lp *LongPoll) ListenHandler(w http.ResponseWriter, r *http.Request) {
 	// Clean the event list
 	lp.globalClientToNewEvents[token] = make([]int, 0)
 
-	sendResponse(w, eventResponse)
+	resthelper.SendResponse(w, eventResponse)
 	delete(lp.globalClientToConnection, token)
 
 }
@@ -219,43 +214,4 @@ func (lp *LongPoll) notifyEvent(client string) {
 func (lp *LongPoll) notifyTimeout(comunicationChanel chan string, seconds int) {
 	time.Sleep(time.Duration(seconds) * time.Second)
 	comunicationChanel <- "TIMEOUT"
-}
-
-func sendError(w http.ResponseWriter, code int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json, err := toJSON(ErrorResponse{code, message})
-	if err != nil {
-		sendError(w, 500, err.Error())
-		return
-	}
-	fmt.Fprintf(w, json)
-}
-
-func sendResponse(w http.ResponseWriter, object interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	json, err := toJSON(object)
-	if err != nil {
-		sendError(w, 500, err.Error())
-		return
-	}
-	fmt.Fprintf(w, json)
-}
-
-func toJSON(object interface{}) (string, error) {
-	json, err := json.Marshal(object)
-	if err != nil {
-		return "", err
-	}
-	return string(json), nil
-}
-
-func GetNewToken(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[seededRand.Intn(len(charset))]
-	}
-	return string(b)
 }
