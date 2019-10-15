@@ -45,7 +45,7 @@ type NewOptions struct {
 	Feeds []string
 }
 
-func New(opt NewOptions) *LongPoll {
+func New() *LongPoll {
 	lp := LongPoll{
 		globalClients:            make(clientExist),
 		globalEvents:             make(events),
@@ -54,19 +54,22 @@ func New(opt NewOptions) *LongPoll {
 		globalClientToConnection: make(clientToConnection),
 		globalConnectionChannel:  make(connectionChannel),
 	}
-
-	if opt.Feeds != nil && len(opt.Feeds) > 0 {
-		for _, feed := range opt.Feeds {
-			lp.globalFeedToClients[feed] = make(clientExist)
-		}
-	}
-
+	fmt.Println(3333)
 	return &lp
 }
 
+func (lp *LongPoll) AddFeed(feeds []string) error {
+	if feeds != nil && len(feeds) > 0 {
+		for _, feed := range feeds {
+			lp.globalFeedToClients[feed] = make(clientExist)
+		}
+	}
+	return nil
+}
+
 type SubscriptionResponse struct {
-	Token string
-	Feeds []string
+	SubscriptionID string
+	Feeds          []string
 }
 
 type EventResponse struct {
@@ -74,15 +77,20 @@ type EventResponse struct {
 }
 
 func (lp *LongPoll) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
-	feeds, ok := r.URL.Query()["feed"]
-	if ok != true {
+	feeds := getFeeds(r)
+	if len(feeds) == 0 {
 		resthelper.SendError(w, 400, "Missing feed")
 		return
 	}
-	token := resthelper.GetNewToken(32)
+	// If a subscriptionID is present, use subscriptionID ID as user token,
+	// otherwhise create a new one
+	subscriptionID := getSubscriptionID(r)
+	if subscriptionID == "" {
+		subscriptionID = resthelper.GetNewToken(32)
+	}
 
 	// Client is not pending
-	lp.globalClients[token] = false
+	lp.globalClients[subscriptionID] = false
 
 	// Feeds validation
 	for _, feed := range feeds {
@@ -91,74 +99,74 @@ func (lp *LongPoll) SubscribeHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	// Client subscription
 	for _, feed := range feeds {
-		lp.globalFeedToClients[feed][token] = true
+		lp.globalFeedToClients[feed][subscriptionID] = true
 	}
 
-	resthelper.SendResponse(w, SubscriptionResponse{token, feeds})
+	resthelper.SendResponse(w, SubscriptionResponse{subscriptionID, feeds})
 }
 
 func (lp *LongPoll) ListenHandler(w http.ResponseWriter, r *http.Request) {
-	tokens, ok := r.URL.Query()["token"]
-	if ok != true {
-		resthelper.SendError(w, 400, "Missing token")
+	subscriptionID := getSubscriptionID(r)
+	if subscriptionID == "" {
+		resthelper.SendError(w, 400, "Missing subscriptionID")
 		return
 	}
-	token := tokens[0]
 
-	// Check if token exists
-	if _, clientExists := lp.globalClients[token]; clientExists == false {
+	// Check if subscriptionID exists
+	if _, clientExists := lp.globalClients[subscriptionID]; clientExists == false {
 		resthelper.SendError(w, 401, "Unauthorized")
 		return
 	}
 
-	fmt.Printf("Received request from %s\n", token)
+	fmt.Printf("Received request from %s\n", subscriptionID)
 
 	// Protect with mutex
 	lp.globalLastConnection = lp.globalLastConnection + 1
 	currentConnection := lp.globalLastConnection
 	// Check if there is a previous listen connection, in this case
-	if previousConnectionIndex, ok := lp.globalClientToConnection[token]; ok == true {
+	if previousConnectionIndex, ok := lp.globalClientToConnection[subscriptionID]; ok == true {
 		// Send a ABORT signal to previous connection
-		fmt.Printf("Closing previous connection (%d) from the same client (%s)\n", previousConnectionIndex, token)
+		fmt.Printf("Closing previous connection (%d) from the same client (%s)\n", previousConnectionIndex, subscriptionID)
 		fmt.Printf("%+v\n", lp.globalConnectionChannel[previousConnectionIndex])
 		lp.globalConnectionChannel[previousConnectionIndex] <- "ABORT"
-		fmt.Printf("Closed previous connection (%d) from the same client (%s)\n", previousConnectionIndex, token)
+		fmt.Printf("Closed previous connection (%d) from the same client (%s)\n", previousConnectionIndex, subscriptionID)
 	}
 
 	// Save the active connection for this client
-	lp.globalClientToConnection[token] = currentConnection
+	lp.globalClientToConnection[subscriptionID] = currentConnection
 
 	// Create a comunication channel to receive async events
 	comunicationChannel := make(chan string)
 	lp.globalConnectionChannel[currentConnection] = comunicationChannel
 
 	// If they are no event, wait for the next one
-	if len(lp.globalClientToNewEvents[token]) == 0 {
+	if len(lp.globalClientToNewEvents[subscriptionID]) == 0 {
 		// Client is pending
-		lp.globalClients[token] = true
+		lp.globalClients[subscriptionID] = true
 
 		// Set a timeout every 5 seconds
 		go lp.notifyTimeout(comunicationChannel, 5)
 
-		fmt.Printf("Client %s (%d) waits for connection\n", token, currentConnection)
+		fmt.Printf("Client %s (%d) waits for connection\n", subscriptionID, currentConnection)
 		operation := <-comunicationChannel
-		fmt.Printf("Client %s (%d) received signal %s\n", token, currentConnection, operation)
+		fmt.Printf("Client %s (%d) received signal %s\n", subscriptionID, currentConnection, operation)
 
 		// Another connection from the same client, this one should be disharged
 		if operation == "ABORT" {
 			resthelper.SendError(w, 204, "Connection aborted")
-			fmt.Printf("Sent abort signal to %s (%d)\n", token, currentConnection)
+			fmt.Printf("Sent abort signal to %s (%d)\n", subscriptionID, currentConnection)
 			return
 		}
 		// Timeout
 		if operation == "TIMEOUT" {
 			resthelper.SendError(w, 408, "Request timeout")
-			fmt.Printf("Sent timeout signal to %s (%d)\n", token, currentConnection)
+			fmt.Printf("Sent timeout signal to %s (%d)\n", subscriptionID, currentConnection)
 			// Delete the connection, or next client will try to closed this one
 			// but it does not exist anymore and it would lock
-			delete(lp.globalClientToConnection, token)
+			delete(lp.globalClientToConnection, subscriptionID)
 			return
 		}
 	}
@@ -166,15 +174,15 @@ func (lp *LongPoll) ListenHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch the events
 	var eventResponse EventResponse
 	eventResponse.Events = make([]event, 0)
-	for _, eventID := range lp.globalClientToNewEvents[token] {
+	for _, eventID := range lp.globalClientToNewEvents[subscriptionID] {
 		eventResponse.Events = append(eventResponse.Events, lp.globalEvents[eventID])
 	}
 
 	// Clean the event list
-	lp.globalClientToNewEvents[token] = make([]int, 0)
+	lp.globalClientToNewEvents[subscriptionID] = make([]int, 0)
 
 	resthelper.SendResponse(w, eventResponse)
-	delete(lp.globalClientToConnection, token)
+	delete(lp.globalClientToConnection, subscriptionID)
 
 }
 
@@ -185,7 +193,7 @@ func (lp *LongPoll) NewEvent(feed string, object interface{}) error {
 		Data:      object,
 		Timestamp: int32(time.Now().Unix()),
 	}
-
+show(lp.globalEvents[newIndex])
 	// Find listening clients
 	waitingClients := make(map[string]bool)
 	for client, _ := range lp.globalFeedToClients[feed] {
@@ -214,4 +222,8 @@ func (lp *LongPoll) notifyEvent(client string) {
 func (lp *LongPoll) notifyTimeout(comunicationChanel chan string, seconds int) {
 	time.Sleep(time.Duration(seconds) * time.Second)
 	comunicationChanel <- "TIMEOUT"
+}
+
+func show(i interface{}) {
+	fmt.Printf("LP:  %+v\n", i)
 }
