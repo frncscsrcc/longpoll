@@ -54,7 +54,6 @@ func New() *LongPoll {
 		globalClientToConnection: make(clientToConnection),
 		globalConnectionChannel:  make(connectionChannel),
 	}
-	fmt.Println(3333)
 	return &lp
 }
 
@@ -193,7 +192,7 @@ func (lp *LongPoll) NewEvent(feed string, object interface{}) error {
 		Data:      object,
 		Timestamp: int32(time.Now().Unix()),
 	}
-show(lp.globalEvents[newIndex])
+
 	// Find listening clients
 	waitingClients := make(map[string]bool)
 	for client, _ := range lp.globalFeedToClients[feed] {
