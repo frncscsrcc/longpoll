@@ -2,19 +2,19 @@ package longpoll
 
 import "net/http"
 
+// ContextStruct is a struct that could be used to inject parameters in the
+// client request
 type ContextStruct struct {
 	SubscriptionID string
 	Feeds          []string
 	SessionID      string
 }
 
-func getFeeds(r *http.Request) []string {
-	feeds := make([]string, 0)
+func getFeeds(r *http.Request) (feeds []string) {
 	var ok bool
 
 	// Search in the context
 	contextStruct, assertOK := r.Context().Value("contextStruct").(ContextStruct)
-	show(contextStruct)
 	if assertOK && len(contextStruct.Feeds) > 0 {
 		return contextStruct.Feeds
 	}
@@ -25,12 +25,12 @@ func getFeeds(r *http.Request) []string {
 		return feeds
 	}
 	return feeds
+
 	// Search in body
 	// TODO
 }
 
-func getSubscriptionID(r *http.Request) string {
-	var subscriptionID string
+func getSubscriptionID(r *http.Request) (subscriptionID string) {
 	var ok bool
 
 	// Search in the context
@@ -45,6 +45,7 @@ func getSubscriptionID(r *http.Request) string {
 		return subscriptionIDs[0]
 	}
 	return subscriptionID
+
 	// Search in body
 	// TODO
 }

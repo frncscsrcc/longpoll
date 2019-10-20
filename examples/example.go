@@ -1,18 +1,20 @@
 package main
 
 import (
-	"github.com/frncscsrcc/longpoll"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/frncscsrcc/longpoll"
 )
 
 func main() {
-	feeds := []string{"feed1", "feed2"}
-	longpoll := longpoll.New(longpoll.NewOptions{Feeds: feeds})
+	longpoll := longpoll.New()
+	longpoll.AddFeeds([]string{"feed1", "feed2", "feed3"})
 	go addEvent(longpoll)
 	http.HandleFunc("/subscribe", longpoll.SubscribeHandler)
 	http.HandleFunc("/listen", longpoll.ListenHandler)
+	log.Println("Listening on port 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
