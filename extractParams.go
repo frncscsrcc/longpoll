@@ -14,7 +14,7 @@ func getFeeds(r *http.Request) (feeds []string) {
 	var ok bool
 
 	// Search in the context
-	contextStruct, assertOK := r.Context().Value("contextStruct").(ContextStruct)
+	contextStruct, assertOK := r.Context().Value(ContextStructIdentifier).(ContextStruct)
 	if assertOK && len(contextStruct.Feeds) > 0 {
 		return contextStruct.Feeds
 	}

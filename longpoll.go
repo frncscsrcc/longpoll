@@ -1,6 +1,7 @@
 package longpoll
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -23,6 +24,14 @@ type events map[int]event
 type clientToNewEvents map[string][]int
 type clientToConnection map[string]int
 type connectionChannel map[int]chan string
+
+type contextStructIdentifier int
+
+// ContextStructIdentifier identifies the key for the struct in the context
+// that contains sessionID, feeds and subscriptionID
+const (
+	ContextStructIdentifier contextStructIdentifier = iota
+)
 
 // LongPoll is the exported basic package structure:
 type LongPoll struct {
@@ -64,6 +73,10 @@ func New() *LongPoll {
 // AddFeed registers one feed. A client can subscribe and listen only
 // to existing feeds.
 func (lp *LongPoll) AddFeed(feed string) error {
+	// Do not do anything if feed exists
+	if _, exists := lp.globalFeedToClients[feed]; exists == true {
+		return errors.New("feed " + feed + " already exists")
+	}
 	if len(feed) > 0 {
 		lp.globalFeedToClients[feed] = make(clientExist)
 	}
